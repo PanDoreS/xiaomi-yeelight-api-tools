@@ -8,9 +8,18 @@ import os
 import errno
 import struct
 import argparse
+import pickle
+import time
 from threading import Thread
 from time import sleep
 from collections import OrderedDict
+
+
+#Configuration
+file_name_search_bulbs = "search_bulbs"
+time_between_broadcast_search_seconds = "30"
+DEBUGGING = False
+TIMEOUT = 1000
 
 
 def debug(msg):
@@ -20,13 +29,12 @@ def debug(msg):
 detected_bulbs = {}
 bulb_idx2ip = {}
 bulb_2execute = {}
-DEBUGGING = False
 RUNNING = True
 current_command_id = 0
 MCAST_GRP = '239.255.255.250'
-TIMEOUT = 1000
 effect_ms = 0
 WARNING = ""
+skip_search = False
 
 
 scan_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) 
@@ -57,7 +65,8 @@ parser.parse_args()
 args = parser.parse_args()
 
 
-
+if not args.list or not args.toggle or not args.bright or not args.rgb or not args.hue or not args.saturation or not args.ctemp or not args.cronadd or not args.crondel or not args.cronget:
+  print "ERROR TO DO : NO VALID COMMAND ARGUMENTS"
 
 if args.id:
 	bulb_2execute = args.id
@@ -71,6 +80,19 @@ if args.effect > 0:
 if args.timeout:
   TIMEOUT = args.timeout
 
+if os.path.isfile(file_name_search_bulbs):
+  with open(file_name_search_bulbs, "rb") as f:
+      data_search = pickle.load(f)
+      if int(time.time()) < data_search[0]+time_between_broadcast_search_seconds:
+        detected_bulbs = list(data_search[1])
+        bulb_idx2ip = list(data_search[2])
+        skip_search = True
+        for i in range(1, len(detected_bulbs)+1):
+          if args.id and i in bulb_2execute:
+            execute_command(i)
+            bulb_2execute.remove(i)
+          elif not args.id:
+            execute_command(i)
 
 
 def next_cmd_id():
@@ -174,36 +196,18 @@ def handle_search_response(data):
   detected_bulbs[host_ip] = [bulb_id, model, power, bright, rgb, host_port]
   bulb_idx2ip[bulb_id] = host_ip
   # user interaction end, tell detection thread to quit and wait
-
   if args.id and bulb_id in bulb_2execute:
     execute_command(bulb_id)
     bulb_2execute.remove(bulb_id)
     if len(bulb_2execute) == 0:
       RUNNING = False
+  elif not args.id:
+    execute_command(bulb_id)
 
-  raw_command = args.command.split("=", 1)[0]
-  if raw_command == "list":
-    display_bulbs()
-  elif raw_command == "toggle":
-    toggle_bulb()
-  elif raw_command == "bright":
-    set_bright()
-  elif raw_command == "rgb":
-    set_rgb()
-  elif raw_command == "hue":
-    set_hsv()
-  elif raw_command == "ctemp":
-    set_ct_abx()
-  elif raw_command == "cron_add":
-    display_bulbs()
-  elif raw_command == "cron_get":
-    display_bulbs()
-  elif raw_command == "cron_del":
-    display_bulbs()
-  elif raw_command == "get_prop":
-    display_bulbs()
-  else:
-    print "{\"error\": true, \"type\": \"invalid_command\"}"
+  with open(file_name_search_bulbs, "wb") as f:
+    temp_array = [int(time.time()), detected_bulbs, bulb_idx2ip]
+    pickle.dump(temp_array, f)
+
 
 def display_bulb(idx, eol):
   if not bulb_idx2ip.has_key(idx):
@@ -232,9 +236,12 @@ def execute_command(idx):
   if args.rgb:
     operate_on_bulb(idx, "set_rgb", args.rgb, effect_ms)
   if (args.hue and args.saturation):
-
+    operate_on_bulb(idx, "set_hsv", args.hue + ", " + args.saturation, effect_ms)
   elif (args.hue and not args.saturation) or (args.saturation and not args.hue):
-    print "ERROR TO DO !!!!"
+    print "ERROR TO DO : MISSING DATA FOR HUE!!!!"
+  if args.ctemp:
+    operate_on_bulb(idx, "set_ct_abx", args.ctemp, effect_ms)
+
 
 def display_bulbs():
   json = "{\"bulbs\": " + str(len(detected_bulbs)) + ", \"bulb\": {"
@@ -270,21 +277,6 @@ def operate_on_bulb(idx, method, params, effect):
     tcp_socket.close()
   except Exception as e:
     print "{\"error\": true, \"type\": \""+ e +"\"}"
-
-
-def set_hsv():
-  if args.id > 0:
-    operate_on_bulb(int(args.id), "set_hsv", args.command.split("=", 1)[1], effect_ms)
-  else:
-    for i in range(1, len(detected_bulbs)+1):
-      operate_on_bulb(i, "set_hsv", args.command.split("=", 1)[1], effect_ms)
-  
-def set_ct_abx():
-  if args.id > 0:
-    operate_on_bulb(int(args.id), "set_ct_abx", args.command.split("=", 1)[1], effect_ms)
-  else:
-    for i in range(1, len(detected_bulbs)+1):
-      operate_on_bulb(i, "set_ct_abx", args.command.split("=", 1)[1], effect_ms)
 
 def handle_user_input():
   '''
@@ -342,6 +334,8 @@ def handle_user_input():
 ## main starts here
 # print welcome message first
 # start the bulb detection thread
-detection_thread = Thread(target=bulbs_detection_loop)
-detection_thread.start()
-detection_thread.join()
+if not skip_search:
+  detection_thread = Thread(target=bulbs_detection_loop)
+  detection_thread.start()
+  detection_thread.join()
+
