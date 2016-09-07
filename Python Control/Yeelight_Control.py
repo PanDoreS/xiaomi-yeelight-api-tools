@@ -65,7 +65,7 @@ parser.parse_args()
 args = parser.parse_args()
 
 
-if not args.list or not args.toggle or not args.bright or not args.rgb or not args.hue or not args.saturation or not args.ctemp or not args.cronadd or not args.crondel or not args.cronget:
+if not args.list and not args.toggle and not args.bright and not args.rgb and not args.hue and not args.saturation and not args.ctemp and not args.cronadd and not args.crondel and not args.cronget:
   print "ERROR TO DO : NO VALID COMMAND ARGUMENTS"
 
 if args.id:
