@@ -35,6 +35,9 @@ MCAST_GRP = '239.255.255.250'
 effect_ms = 0
 WARNING = ""
 skip_search = False
+error_json = False
+error_string_json = ""
+return_json_string = ""
 
 
 scan_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) 
@@ -64,9 +67,27 @@ parser.add_argument("-i", "--id", help="id of the light bulb fetchable by \"list
 parser.parse_args()
 args = parser.parse_args()
 
+def json_return(status,msg = ""):
+  global error_json, error_string_json, return_json_string
+  if status == 1:
+    error_json = True
+    if error_string_json == "":
+      error_string_json = "[ \"" + msg + "\""
+    else:
+      error_string_json += ", \"" + msg + "\""
+  elif status == 2:
+    return_json_string = msg
+  elif status == 3:
+    if error_json:
+      json_final = "{\"success\": false, \"error\": " + error_string_json + " ]}"
+    else:
+      json_final = "{\"success\": true, \"result\": " + return_json_string + "}"
+    print json_final
 
 if not args.list and not args.toggle and not args.bright and not args.rgb and not args.hue and not args.saturation and not args.ctemp and not args.cronadd and not args.crondel and not args.cronget:
-  print "ERROR TO DO : NO VALID COMMAND ARGUMENTS"
+  json_return(1, "no_valid_command")
+  json_return(3)
+  exit()
 
 if args.id:
 	bulb_2execute = args.id
@@ -93,7 +114,6 @@ if os.path.isfile(file_name_search_bulbs):
             bulb_2execute.remove(i)
           elif not args.id:
             execute_command(i)
-
 
 def next_cmd_id():
   global current_command_id
@@ -156,7 +176,7 @@ def bulbs_detection_loop():
     sleep(read_interval/1000.0)
     if time_elapsed >= TIMEOUT:
       RUNNING = False
-      print "{\"error\": true, \"type\": \"timeout\"}"
+      json_return(1, "timeout")
   scan_socket.close()
   listen_socket.close()
 
@@ -211,7 +231,7 @@ def handle_search_response(data):
 
 def display_bulb(idx, eol):
   if not bulb_idx2ip.has_key(idx):
-    print "{\"error\": true, \"type\": \"invalid_idx\"}"
+    json_return(1, "invalid_idx")
     return
   bulb_ip = bulb_idx2ip[idx]
   model = detected_bulbs[bulb_ip][1]
@@ -238,7 +258,7 @@ def execute_command(idx):
   if (args.hue and args.saturation):
     operate_on_bulb(idx, "set_hsv", args.hue + ", " + args.saturation, effect_ms)
   elif (args.hue and not args.saturation) or (args.saturation and not args.hue):
-    print "ERROR TO DO : MISSING DATA FOR HUE!!!!"
+    json_return(1, "missing_parameter_for_hue")
   if args.ctemp:
     operate_on_bulb(idx, "set_ct_abx", args.ctemp, effect_ms)
 
@@ -250,7 +270,7 @@ def display_bulbs():
       json += display_bulb(i, True)
     else:
       json += display_bulb(i, False)
-  print json + "}"
+  json_return(2, json)
 
 def operate_on_bulb(idx, method, params, effect):
   '''
@@ -259,7 +279,7 @@ def operate_on_bulb(idx, method, params, effect):
   E.g. params="1"; params="\"smooth\"", params="1,\"smooth\",80"
   '''
   if not bulb_idx2ip.has_key(idx):
-    print "{\"error\": true, \"type\": \"invalid_idx\"}"
+    json_return(1, "invalid_idx")
     return
   
   #HERE EFFECT
@@ -276,7 +296,7 @@ def operate_on_bulb(idx, method, params, effect):
     tcp_socket.send(msg)
     tcp_socket.close()
   except Exception as e:
-    print "{\"error\": true, \"type\": \""+ e +"\"}"
+    json_return(1, e)
 
 def handle_user_input():
   '''
@@ -339,3 +359,4 @@ if not skip_search:
   detection_thread.start()
   detection_thread.join()
 
+json_return(3)
